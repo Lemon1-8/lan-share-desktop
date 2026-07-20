@@ -12,6 +12,7 @@ interface Announcement {
   port: number;
   indexVersion: number;
   sentAt: number;
+  directReply?: boolean;
 }
 
 export class DiscoveryService extends EventEmitter {
@@ -62,6 +63,13 @@ export class DiscoveryService extends EventEmitter {
     if (!this.socket) {
       return;
     }
+    this.sendAnnouncement(getBroadcastTargets(), false);
+  }
+
+  private sendAnnouncement(targets: string[], directReply: boolean): void {
+    if (!this.socket) {
+      return;
+    }
     const local = this.getLocalDevice();
     const announcement: Announcement = {
       type: "lan-share:announce",
@@ -70,10 +78,11 @@ export class DiscoveryService extends EventEmitter {
       displayName: local.displayName,
       port: local.serverPort,
       indexVersion: this.getIndexVersion(),
-      sentAt: Date.now()
+      sentAt: Date.now(),
+      directReply
     };
     const payload = Buffer.from(JSON.stringify(announcement));
-    for (const target of getBroadcastTargets()) {
+    for (const target of targets) {
       this.socket.send(payload, DISCOVERY_PORT, target, () => undefined);
     }
   }
@@ -119,6 +128,10 @@ export class DiscoveryService extends EventEmitter {
       !announcement.port
     ) {
       return;
+    }
+
+    if (!announcement.directReply) {
+      this.sendAnnouncement([host], true);
     }
 
     const previous = this.peers.get(announcement.deviceId);

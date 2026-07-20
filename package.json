@@ -1,6 +1,6 @@
 {
   "name": "lan-share-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Windows-first LAN peer-to-peer file sharing desktop app.",
   "main": "dist/main/main.js",
