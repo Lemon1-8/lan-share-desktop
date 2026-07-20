@@ -19,6 +19,10 @@ let discovery: DiscoveryService;
 let downloads: DownloadManager;
 let lanServer: LanHttpServer;
 
+function getAppIconPath(): string {
+  return app.isPackaged ? path.join(process.resourcesPath, "icon.ico") : path.join(process.cwd(), "build", "icon.ico");
+}
+
 async function bootstrap(): Promise<void> {
   const db = new AppDatabase(path.join(app.getPath("userData"), "lan-share.sqlite"));
   await db.init();
@@ -55,6 +59,7 @@ function createWindow(): void {
     minWidth: 560,
     minHeight: 520,
     title: "局域网文件共享",
+    icon: getAppIconPath(),
     backgroundColor: "#f6f7f9",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

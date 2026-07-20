@@ -41,7 +41,14 @@
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "portable",
