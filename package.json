@@ -1,0 +1,56 @@
+{
+  "name": "lan-share-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows-first LAN peer-to-peer file sharing desktop app.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"tsc -p tsconfig.main.json --watch\" \"wait-on tcp:5173 dist/main/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "pack:win": "npm run build && electron-builder --win portable --x64",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit"
+  },
+  "dependencies": {
+    "mime-types": "^2.1.35",
+    "sql.js": "^1.13.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/mime-types": "^2.1.4",
+    "@types/node": "^24.0.15",
+    "@types/sql.js": "^1.4.9",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.5",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.local.lanshare",
+    "productName": "LanShare Desktop",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "LanShare-Desktop-${version}-portable.${ext}"
+    }
+  }
+}
