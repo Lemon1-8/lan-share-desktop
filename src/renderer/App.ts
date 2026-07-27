@@ -314,6 +314,7 @@ function renderMine(): string {
       <input id="folderName" type="text" placeholder="文件夹名称" maxlength="80" />
       <button data-action="create-folder">新建文件夹</button>
       <button class="primary" data-action="upload-files">共享文件</button>
+      <button class="secondary" data-action="upload-folder">共享文件夹</button>
     </section>
     <section class="content-grid local-grid">
       <div class="panel folder-panel">
@@ -572,6 +573,7 @@ function renderPeerSection(peer: Peer): string {
         </div>
         <span class="badge ok">在线</span>
       </div>
+      ${renderRemoteFolders(peer, manifest)}
       ${
         manifest.files.length
           ? `<table class="remote-file-table">
@@ -583,6 +585,36 @@ function renderPeerSection(peer: Peer): string {
           : `<div class="empty">这台设备当前没有共享文件</div>`
       }
     </section>
+  `;
+}
+
+function renderRemoteFolders(peer: Peer, manifest: LibraryManifest): string {
+  const folders = flattenFolderTree(manifest.folders);
+  if (folders.length === 0) {
+    return "";
+  }
+
+  return `
+    <div class="remote-folder-section">
+      <div class="subfolder-title">共享文件夹</div>
+      <div class="remote-folder-list">
+        ${folders
+          .map((folder) => {
+            const stats = getRemoteFolderStats(manifest, folder.id);
+            return `
+              <div class="remote-folder-row" style="--folder-depth:${Math.max(0, folderDepth(folder.id, manifest.folders) - 1)}">
+                <span class="folder-depth-marker"></span>
+                <div>
+                  <strong>${escapeHtml(folder.name)}</strong>
+                  <small>${escapeHtml(folderPath(folder.id, manifest.folders))} · ${stats.fileCount} 个文件 · ${formatBytes(stats.size)}</small>
+                </div>
+                <button class="action-chip primary" data-action="download-folder" data-peer-id="${escapeAttr(peer.deviceId)}" data-folder-id="${escapeAttr(folder.id)}">下载文件夹</button>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
   `;
 }
 
@@ -743,6 +775,14 @@ function bindEvents(): void {
     });
   });
 
+  appRoot.querySelector<HTMLButtonElement>('[data-action="upload-folder"]')?.addEventListener("click", () => {
+    void action(async () => {
+      await window.lanShare.chooseAndUploadFolder({ folderId: getCurrentFolderId(requireLocal()) });
+      await refreshLocal(false);
+      state.notice = "文件夹已加入共享。";
+    });
+  });
+
   appRoot.querySelectorAll<HTMLButtonElement>('[data-action="select-folder"]').forEach((button) => {
     button.addEventListener("click", () => {
       state.currentFolderId = button.dataset.folderId || null;
@@ -851,6 +891,22 @@ function bindEvents(): void {
         const task = await window.lanShare.startDownload(requireDataset(button, "peerId"), requireDataset(button, "fileId"));
         if (task) {
           state.tab = "transfers";
+          await refreshDownloads(false);
+        }
+      });
+    });
+  });
+
+  appRoot.querySelectorAll<HTMLButtonElement>('[data-action="download-folder"]').forEach((button) => {
+    button.addEventListener("click", () => {
+      void action(async () => {
+        const tasks = await window.lanShare.startFolderDownload(
+          requireDataset(button, "peerId"),
+          requireDataset(button, "folderId")
+        );
+        if (tasks && tasks.length > 0) {
+          state.tab = "transfers";
+          state.notice = `已添加 ${tasks.length} 个下载任务。`;
           await refreshDownloads(false);
         }
       });
@@ -1046,6 +1102,30 @@ function getFolderStats(local: LocalState, folderId: string | null): {
     fileCount: files.length,
     sharedFileCount: files.filter((file) => file.shared).length
   };
+}
+
+function getRemoteFolderStats(manifest: LibraryManifest, folderId: string): { fileCount: number; size: number } {
+  const folderIds = getDescendantFolderIds(manifest.folders, folderId);
+  const files = manifest.files.filter((file) => file.folderId !== null && folderIds.has(file.folderId));
+  return {
+    fileCount: files.length,
+    size: files.reduce((total, file) => total + file.size, 0)
+  };
+}
+
+function getDescendantFolderIds(folders: FolderRecord[], folderId: string): Set<string> {
+  const ids = new Set<string>([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
 }
 
 function folderDepth(folderId: string, folders: FolderRecord[]): number {

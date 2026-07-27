@@ -1,12 +1,13 @@
 import { EventEmitter } from "node:events";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rename, stat, unlink } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { dialog } from "electron";
 import { v4 as uuidv4 } from "uuid";
-import type { DownloadTask, RemoteFileRecord } from "../shared/types";
+import type { DownloadTask, FolderRecord, LibraryManifest, RemoteFileRecord } from "../shared/types";
 import { DiscoveryService } from "./discovery";
+import { sanitizeName, uniquePathParts } from "./path-utils";
 
 interface StoredDownload {
   task: DownloadTask;
@@ -67,6 +68,65 @@ export class DownloadManager extends EventEmitter {
     this.emitUpdated();
     void this.run(task.id);
     return { ...task };
+  }
+
+  async startFolder(peerId: string, folderId: string): Promise<DownloadTask[] | null> {
+    const peer = this.discovery.getPeer(peerId);
+    if (!peer) {
+      throw new Error("设备已离线。");
+    }
+
+    const manifest = await this.discovery.fetchManifest(peerId);
+    const folder = manifest.folders.find((item) => item.id === folderId);
+    if (!folder) {
+      throw new Error("文件夹不存在。");
+    }
+
+    const files = getFilesInFolder(manifest, folderId);
+    if (files.length === 0) {
+      throw new Error("文件夹中没有可下载的共享文件。");
+    }
+
+    const saveResult = await dialog.showOpenDialog({
+      title: "选择保存位置",
+      buttonLabel: "下载到这里",
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (saveResult.canceled || saveResult.filePaths.length === 0) {
+      return null;
+    }
+
+    const rootSavePath = getUniqueDirectoryPath(saveResult.filePaths[0], folder.name);
+    await mkdir(rootSavePath, { recursive: true });
+
+    const foldersById = new Map(manifest.folders.map((item) => [item.id, item]));
+    const usedSavePaths = new Set<string>();
+    const now = Date.now();
+    const tasks = files.map((file, index) => {
+      const relativeFolders = file.folderId ? getRelativeFolderParts(file.folderId, folderId, foldersById) : [];
+      const saveFolder = path.join(rootSavePath, ...relativeFolders);
+      const savePath = getUniqueSavePath(saveFolder, file.name, usedSavePaths);
+      const task: DownloadTask = {
+        id: uuidv4(),
+        peerId,
+        peerName: peer.displayName,
+        fileId: file.id,
+        fileName: file.name,
+        savePath,
+        receivedBytes: 0,
+        totalBytes: file.size,
+        speedBytesPerSecond: 0,
+        status: "queued",
+        createdAt: now + index,
+        updatedAt: now
+      };
+      this.downloads.set(task.id, { task, peerId, fileId: file.id });
+      return task;
+    });
+
+    this.emitUpdated();
+    void this.runBatch(tasks.map((task) => task.id));
+    return tasks.map((task) => ({ ...task }));
   }
 
   async retry(downloadId: string): Promise<DownloadTask> {
@@ -173,6 +233,12 @@ export class DownloadManager extends EventEmitter {
     }
   }
 
+  private async runBatch(downloadIds: string[]): Promise<void> {
+    for (const downloadId of downloadIds) {
+      await this.run(downloadId);
+    }
+  }
+
   private fail(task: DownloadTask, error: string): void {
     task.status = "failed";
     task.error = error;
@@ -184,6 +250,58 @@ export class DownloadManager extends EventEmitter {
   private emitUpdated(): void {
     this.emit("updated", this.list());
   }
+}
+
+function getFilesInFolder(manifest: LibraryManifest, folderId: string): RemoteFileRecord[] {
+  const folderIds = new Set([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of manifest.folders) {
+      if (folder.parentId && folderIds.has(folder.parentId) && !folderIds.has(folder.id)) {
+        folderIds.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return manifest.files.filter((file) => file.folderId !== null && folderIds.has(file.folderId));
+}
+
+function getRelativeFolderParts(
+  folderId: string,
+  rootFolderId: string,
+  foldersById: Map<string, FolderRecord>
+): string[] {
+  const parts: string[] = [];
+  let current = foldersById.get(folderId);
+  while (current && current.id !== rootFolderId) {
+    parts.unshift(sanitizeName(current.name, "文件夹"));
+    current = current.parentId ? foldersById.get(current.parentId) : undefined;
+  }
+  return parts;
+}
+
+function getUniqueDirectoryPath(parentPath: string, folderName: string): string {
+  const cleanName = sanitizeName(folderName, "下载文件夹");
+  let candidate = path.join(parentPath, cleanName);
+  let index = 2;
+  while (existsSync(candidate)) {
+    candidate = path.join(parentPath, `${cleanName} (${index})`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function getUniqueSavePath(folderPath: string, fileName: string, usedSavePaths: Set<string>): string {
+  const { base, ext } = uniquePathParts(fileName);
+  let candidate = path.join(folderPath, `${base}${ext}`);
+  let index = 2;
+  while (usedSavePaths.has(candidate.toLowerCase()) || existsSync(candidate)) {
+    candidate = path.join(folderPath, `${base} (${index})${ext}`);
+    index += 1;
+  }
+  usedSavePaths.add(candidate.toLowerCase());
+  return candidate;
 }
 
 async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {

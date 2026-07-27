@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdir, copyFile, stat } from "node:fs/promises";
+import { mkdir, copyFile, lstat, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { lookup as lookupMime } from "mime-types";
 import { v4 as uuidv4 } from "uuid";
@@ -54,24 +54,7 @@ export class LocalLibrary extends EventEmitter {
   }
 
   async createFolder(name: string, parentId: string | null): Promise<FolderRecord> {
-    const cleanName = sanitizeName(name, "新建文件夹");
-    if (parentId) {
-      this.requireFolder(parentId);
-    }
-    const uniqueName = this.getUniqueFolderName(cleanName, parentId);
-    const record: FolderRecord = {
-      id: uuidv4(),
-      name: uniqueName,
-      parentId,
-      ownerDeviceId: this.settings.getDeviceId(),
-      createdAt: Date.now()
-    };
-
-    await this.db.run(
-      "INSERT INTO folders(id, name, parentId, ownerDeviceId, createdAt) VALUES(?, ?, ?, ?, ?)",
-      [record.id, record.name, record.parentId, record.ownerDeviceId, record.createdAt]
-    );
-    await mkdir(this.resolveFolderPath(record.id), { recursive: true });
+    const record = await this.createFolderRecord(name, parentId);
     await this.markUpdated();
     return record;
   }
@@ -111,36 +94,27 @@ export class LocalLibrary extends EventEmitter {
 
     const created: LocalFileRecord[] = [];
     for (const sourcePath of sourcePaths) {
-      const fileName = path.basename(sourcePath);
-      const targetPath = this.getUniqueFilePath(targetFolder, fileName);
-      await copyFile(sourcePath, targetPath);
-      const fileStat = await stat(targetPath);
-      const record: LocalFileRecord = {
-        id: uuidv4(),
-        folderId,
-        name: path.basename(targetPath),
-        size: fileStat.size,
-        mimeType: lookupMime(targetPath) || "application/octet-stream",
-        ownerDeviceId: this.settings.getDeviceId(),
-        localPath: targetPath,
-        updatedAt: fileStat.mtimeMs,
-        shared: true
-      };
-      await this.db.run(
-        `INSERT INTO files(id, folderId, name, size, mimeType, ownerDeviceId, localPath, updatedAt, shared)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        [
-          record.id,
-          record.folderId,
-          record.name,
-          record.size,
-          record.mimeType,
-          record.ownerDeviceId,
-          record.localPath,
-          record.updatedAt
-        ]
-      );
-      created.push(record);
+      created.push(await this.importFile(sourcePath, folderId, targetFolder));
+    }
+
+    await this.markUpdated();
+    return created;
+  }
+
+  async importFolders(sourcePaths: string[], parentFolderId: string | null): Promise<LocalFileRecord[]> {
+    if (parentFolderId) {
+      this.requireFolder(parentFolderId);
+    }
+
+    const created: LocalFileRecord[] = [];
+    for (const sourcePath of sourcePaths) {
+      const sourceStat = await lstat(sourcePath);
+      if (!sourceStat.isDirectory()) {
+        throw new Error(`${path.basename(sourcePath)} 不是文件夹。`);
+      }
+
+      const rootFolder = await this.createFolderRecord(path.basename(sourcePath), parentFolderId);
+      await this.importFolderContents(sourcePath, rootFolder.id, created);
     }
 
     await this.markUpdated();
@@ -270,6 +244,93 @@ export class LocalLibrary extends EventEmitter {
       current = current.parentId ? this.requireFolder(current.parentId) : null;
     }
     return path.join(this.settings.getLibraryRoot(), ...parts);
+  }
+
+  private async createFolderRecord(name: string, parentId: string | null): Promise<FolderRecord> {
+    const cleanName = sanitizeName(name, "新建文件夹");
+    if (parentId) {
+      this.requireFolder(parentId);
+    }
+    const uniqueName = this.getUniqueFolderName(cleanName, parentId);
+    const record: FolderRecord = {
+      id: uuidv4(),
+      name: uniqueName,
+      parentId,
+      ownerDeviceId: this.settings.getDeviceId(),
+      createdAt: Date.now()
+    };
+
+    await this.db.run(
+      "INSERT INTO folders(id, name, parentId, ownerDeviceId, createdAt) VALUES(?, ?, ?, ?, ?)",
+      [record.id, record.name, record.parentId, record.ownerDeviceId, record.createdAt]
+    );
+    await mkdir(this.resolveFolderPath(record.id), { recursive: true });
+    return record;
+  }
+
+  private async importFolderContents(
+    sourceFolder: string,
+    targetFolderId: string,
+    created: LocalFileRecord[]
+  ): Promise<void> {
+    const targetFolderPath = this.resolveFolderPath(targetFolderId);
+    const entries = await readdir(sourceFolder, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+
+      const sourcePath = path.join(sourceFolder, entry.name);
+      if (entry.isDirectory()) {
+        const childFolder = await this.createFolderRecord(entry.name, targetFolderId);
+        await this.importFolderContents(sourcePath, childFolder.id, created);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        created.push(await this.importFile(sourcePath, targetFolderId, targetFolderPath));
+      }
+    }
+  }
+
+  private async importFile(
+    sourcePath: string,
+    folderId: string | null,
+    targetFolder?: string
+  ): Promise<LocalFileRecord> {
+    const resolvedTargetFolder = targetFolder ?? this.getFolderPath(folderId);
+    await mkdir(resolvedTargetFolder, { recursive: true });
+    const fileName = path.basename(sourcePath);
+    const targetPath = this.getUniqueFilePath(resolvedTargetFolder, fileName);
+    await copyFile(sourcePath, targetPath);
+    const fileStat = await stat(targetPath);
+    const record: LocalFileRecord = {
+      id: uuidv4(),
+      folderId,
+      name: path.basename(targetPath),
+      size: fileStat.size,
+      mimeType: lookupMime(targetPath) || "application/octet-stream",
+      ownerDeviceId: this.settings.getDeviceId(),
+      localPath: targetPath,
+      updatedAt: fileStat.mtimeMs,
+      shared: true
+    };
+    await this.db.run(
+      `INSERT INTO files(id, folderId, name, size, mimeType, ownerDeviceId, localPath, updatedAt, shared)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        record.id,
+        record.folderId,
+        record.name,
+        record.size,
+        record.mimeType,
+        record.ownerDeviceId,
+        record.localPath,
+        record.updatedAt
+      ]
+    );
+    return record;
   }
 
   private getUniqueFolderName(name: string, parentId: string | null, exceptFolderId?: string): string {

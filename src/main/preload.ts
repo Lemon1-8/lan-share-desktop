@@ -17,6 +17,8 @@ const api = {
   deleteFolder: (folderId: string) => ipcRenderer.invoke("local:delete-folder", folderId) as Promise<void>,
   chooseAndUploadFiles: (input: UploadFilesInput) =>
     ipcRenderer.invoke("local:choose-and-upload-files", input) as Promise<void>,
+  chooseAndUploadFolder: (input: UploadFilesInput) =>
+    ipcRenderer.invoke("local:choose-and-upload-folder", input) as Promise<void>,
   unshareFile: (fileId: string) => ipcRenderer.invoke("local:unshare-file", fileId) as Promise<void>,
   reshareFile: (fileId: string) => ipcRenderer.invoke("local:reshare-file", fileId) as Promise<void>,
   deleteFile: (fileId: string) => ipcRenderer.invoke("local:delete-file", fileId) as Promise<void>,
@@ -31,6 +33,8 @@ const api = {
 
   startDownload: (deviceId: string, fileId: string) =>
     ipcRenderer.invoke("downloads:start", deviceId, fileId) as Promise<DownloadTask | null>,
+  startFolderDownload: (deviceId: string, folderId: string) =>
+    ipcRenderer.invoke("downloads:start-folder", deviceId, folderId) as Promise<DownloadTask[] | null>,
   retryDownload: (downloadId: string) => ipcRenderer.invoke("downloads:retry", downloadId) as Promise<DownloadTask>,
   getDownloads: () => ipcRenderer.invoke("downloads:list") as Promise<DownloadTask[]>,
 

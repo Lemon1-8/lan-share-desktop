@@ -98,6 +98,16 @@ function registerIpc(): void {
     }
     await library.importFiles(result.filePaths, input.folderId);
   });
+  ipcMain.handle("local:choose-and-upload-folder", async (_event, input: UploadFilesInput) => {
+    const result = await dialog.showOpenDialog({
+      title: "选择要共享的文件夹",
+      properties: ["openDirectory"]
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return;
+    }
+    await library.importFolders(result.filePaths, input.folderId);
+  });
   ipcMain.handle("local:unshare-file", async (_event, fileId: string) => {
     await library.unshareFile(fileId);
   });
@@ -126,6 +136,9 @@ function registerIpc(): void {
   );
 
   ipcMain.handle("downloads:start", (_event, deviceId: string, fileId: string) => downloads.start(deviceId, fileId));
+  ipcMain.handle("downloads:start-folder", (_event, deviceId: string, folderId: string) =>
+    downloads.startFolder(deviceId, folderId)
+  );
   ipcMain.handle("downloads:retry", (_event, downloadId: string) => downloads.retry(downloadId));
   ipcMain.handle("downloads:list", () => downloads.list());
 
