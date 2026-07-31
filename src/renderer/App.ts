@@ -437,7 +437,7 @@ function renderSettings(): string {
       </div>
       <label class="toggle-line">
         <input id="minimizeOnClose" type="checkbox" ${state.minimizeOnClose ? "checked" : ""} />
-        <span>关闭窗口时最小化</span>
+        <span>关闭窗口时最小化到托盘</span>
       </label>
       <label class="toggle-line">
         <input id="autoLaunch" type="checkbox" ${state.autoLaunch ? "checked" : ""} />

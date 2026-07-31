@@ -1,6 +1,6 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Tray } from "electron";
 import type { CreateFolderInput, RenameFolderInput, UpdateSettingsInput, UploadFilesInput } from "../shared/types";
 import { APP_NAME } from "./constants";
 import { AppDatabase } from "./database";
@@ -19,6 +19,7 @@ let discovery: DiscoveryService;
 let downloads: DownloadManager;
 let lanServer: LanHttpServer;
 let isQuitting = false;
+let tray: Tray | null = null;
 
 function getAppIconPath(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "icon.ico") : path.join(process.cwd(), "build", "icon.ico");
@@ -51,6 +52,7 @@ async function bootstrap(): Promise<void> {
   wireEvents();
   discovery.start();
   createWindow();
+  syncTrayVisibility();
 }
 
 function createWindow(): void {
@@ -82,12 +84,64 @@ function createWindow(): void {
       return;
     }
     event.preventDefault();
-    mainWindow?.minimize();
+    hideToTray();
   });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+function ensureTray(): void {
+  if (tray) {
+    return;
+  }
+  tray = new Tray(getAppIconPath());
+  tray.setToolTip(APP_NAME);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "显示窗口", click: showMainWindow },
+      { type: "separator" },
+      {
+        label: "退出",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+  tray.on("click", showMainWindow);
+  tray.on("double-click", showMainWindow);
+}
+
+function destroyTray(): void {
+  tray?.destroy();
+  tray = null;
+}
+
+function syncTrayVisibility(): void {
+  if (settings.getMinimizeOnClose()) {
+    ensureTray();
+  } else {
+    destroyTray();
+  }
+}
+
+function hideToTray(): void {
+  ensureTray();
+  mainWindow?.hide();
+}
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    createWindow();
+  }
+  if (mainWindow?.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow?.show();
+  mainWindow?.focus();
 }
 
 function registerIpc(): void {
@@ -158,6 +212,7 @@ function registerIpc(): void {
   ipcMain.handle("settings:update", async (_event, input: UpdateSettingsInput) => {
     await settings.updateDisplayName(input.displayName);
     await settings.updateMinimizeOnClose(input.minimizeOnClose);
+    syncTrayVisibility();
   });
   ipcMain.handle("settings:get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle("settings:set-auto-launch", (_event, enabled: boolean) => {
