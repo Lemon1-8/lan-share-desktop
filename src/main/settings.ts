@@ -23,6 +23,7 @@ export class SettingsService {
     await this.ensureSetting("libraryRoot", path.join(this.documentsPath, "LanShareLibrary"));
     await this.ensureSetting("preferredPort", String(DEFAULT_HTTP_PORT));
     await this.ensureSetting("indexVersion", String(Date.now()));
+    await this.ensureSetting("minimizeOnClose", "true");
     await mkdir(this.getLibraryRoot(), { recursive: true });
   }
 
@@ -32,7 +33,8 @@ export class SettingsService {
       displayName: this.getSetting("displayName"),
       libraryRoot: this.getLibraryRoot(),
       serverPort,
-      discoveryPort: DISCOVERY_PORT
+      discoveryPort: DISCOVERY_PORT,
+      minimizeOnClose: this.getMinimizeOnClose()
     };
   }
 
@@ -56,6 +58,10 @@ export class SettingsService {
     return Number(this.getSetting("indexVersion")) || Date.now();
   }
 
+  getMinimizeOnClose(): boolean {
+    return this.getSetting("minimizeOnClose") !== "false";
+  }
+
   async setServerPort(port: number): Promise<void> {
     await this.setSetting("preferredPort", String(port));
   }
@@ -67,6 +73,10 @@ export class SettingsService {
     }
     await this.setSetting("displayName", clean);
     await this.bumpIndexVersion();
+  }
+
+  async updateMinimizeOnClose(enabled: boolean): Promise<void> {
+    await this.setSetting("minimizeOnClose", enabled ? "true" : "false");
   }
 
   async bumpIndexVersion(): Promise<number> {

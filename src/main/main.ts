@@ -18,6 +18,7 @@ let settings: SettingsService;
 let discovery: DiscoveryService;
 let downloads: DownloadManager;
 let lanServer: LanHttpServer;
+let isQuitting = false;
 
 function getAppIconPath(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "icon.ico") : path.join(process.cwd(), "build", "icon.ico");
@@ -75,6 +76,18 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
   }
+
+  mainWindow.on("close", (event) => {
+    if (isQuitting || !settings.getMinimizeOnClose()) {
+      return;
+    }
+    event.preventDefault();
+    mainWindow?.minimize();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
 function registerIpc(): void {
@@ -144,6 +157,7 @@ function registerIpc(): void {
 
   ipcMain.handle("settings:update", async (_event, input: UpdateSettingsInput) => {
     await settings.updateDisplayName(input.displayName);
+    await settings.updateMinimizeOnClose(input.minimizeOnClose);
   });
   ipcMain.handle("settings:get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
   ipcMain.handle("settings:set-auto-launch", (_event, enabled: boolean) => {
@@ -181,6 +195,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   discovery?.stop();
   void lanServer?.stop();
 });

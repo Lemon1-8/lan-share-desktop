@@ -25,6 +25,7 @@ interface UiState {
   notice: string | null;
   error: string | null;
   autoLaunch: boolean;
+  minimizeOnClose: boolean;
   isRefreshing: boolean;
 }
 
@@ -66,6 +67,7 @@ const state: UiState = {
   notice: null,
   error: null,
   autoLaunch: false,
+  minimizeOnClose: true,
   isRefreshing: false
 };
 
@@ -104,6 +106,7 @@ async function boot(): Promise<void> {
 
 async function refreshLocal(shouldRender = true): Promise<void> {
   state.local = await window.lanShare.getLocalState();
+  state.minimizeOnClose = state.local.device.minimizeOnClose;
   normalizeCurrentFolder();
   if (shouldRender) {
     render();
@@ -432,6 +435,10 @@ function renderSettings(): string {
         <div><span>文件服务端口</span><strong>${local.device.serverPort}</strong></div>
         <div><span>设备发现端口</span><strong>${local.device.discoveryPort}</strong></div>
       </div>
+      <label class="toggle-line">
+        <input id="minimizeOnClose" type="checkbox" ${state.minimizeOnClose ? "checked" : ""} />
+        <span>关闭窗口时最小化</span>
+      </label>
       <label class="toggle-line">
         <input id="autoLaunch" type="checkbox" ${state.autoLaunch ? "checked" : ""} />
         <span>开机自动启动</span>
@@ -925,10 +932,16 @@ function bindEvents(): void {
   appRoot.querySelector<HTMLButtonElement>('[data-action="save-settings"]')?.addEventListener("click", () => {
     void action(async () => {
       const displayName = appRoot.querySelector<HTMLInputElement>("#displayName")?.value ?? "";
-      await window.lanShare.updateSettings({ displayName });
+      const minimizeOnClose =
+        appRoot.querySelector<HTMLInputElement>("#minimizeOnClose")?.checked ?? state.minimizeOnClose;
+      await window.lanShare.updateSettings({ displayName, minimizeOnClose });
       await refreshLocal(false);
       state.notice = "设置已保存。";
     });
+  });
+
+  appRoot.querySelector<HTMLInputElement>("#minimizeOnClose")?.addEventListener("change", (event) => {
+    state.minimizeOnClose = (event.currentTarget as HTMLInputElement).checked;
   });
 
   appRoot.querySelector<HTMLInputElement>("#autoLaunch")?.addEventListener("change", (event) => {

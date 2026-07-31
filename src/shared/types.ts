@@ -7,6 +7,7 @@ export interface PublicDevice {
 export interface DeviceInfo extends PublicDevice {
   libraryRoot: string;
   discoveryPort: number;
+  minimizeOnClose: boolean;
 }
 
 export interface FolderRecord {
@@ -96,4 +97,5 @@ export interface UploadFilesInput {
 
 export interface UpdateSettingsInput {
   displayName: string;
+  minimizeOnClose: boolean;
 }
